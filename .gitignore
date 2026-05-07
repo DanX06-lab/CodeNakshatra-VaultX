@@ -1,0 +1,12 @@
+# Dependency directories
+node_modules/
+
+# Environment variables (CRITICAL)
+.env
+blockchain/.env
+server/.env
+
+# Hardhat & Smart Contract Artifacts
+cache/
+artifacts/
+ignition/deployments/
