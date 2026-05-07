@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'signup_screen.dart';
 import '../themes/vaultx_colors.dart';
+import '../services/metamask_service.dart';
+import '../services/wallet_connect_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -12,11 +16,206 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _controller = PageController();
   int currentPage = 0;
+  final MetaMaskService _metaMaskService = MetaMaskService();
+  final WalletConnectService _walletConnectService = WalletConnectService();
+  bool _isConnecting = false;
+  bool _isConnected = false;
+  bool _showQRCode = false;
+  String? _qrCodeUri;
 
-  void goNext() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const SignupScreen()),
+  @override
+  void initState() {
+    super.initState();
+    _initializeServices();
+  }
+
+  Future<void> _initializeServices() async {
+    await _metaMaskService.initialize();
+    await _walletConnectService.initialize();
+    setState(() {
+      _isConnected = _metaMaskService.currentAccount != null || 
+                   _walletConnectService.connectedAccount != null;
+    });
+  }
+
+  Future<void> _connectWallet() async {
+    setState(() => _isConnecting = true);
+
+    try {
+      String? account;
+
+      if (kIsWeb) {
+        // Web: Try MetaMask first
+        if (_metaMaskService.isInstalled) {
+          account = await _metaMaskService.connectWallet();
+        } else {
+          _showMetaMaskNotInstalledDialog();
+          return;
+        }
+      } else {
+        // Mobile: Use WalletConnect
+        account = await _walletConnectService.connectWallet();
+      }
+      
+      if (account != null) {
+        setState(() => _isConnected = true);
+        _showSuccessDialog(account);
+      } else {
+        _showErrorDialog('Failed to connect wallet');
+      }
+    } catch (e) {
+      _showErrorDialog(e.toString());
+    } finally {
+      setState(() => _isConnecting = false);
+    }
+  }
+
+  Future<void> _showQRCodeDialog() async {
+    try {
+      // For mobile, show QR code for scanning with MetaMask
+      setState(() => _isConnecting = true);
+      
+      // This would generate a WalletConnect URI
+      // For now, we'll show a placeholder
+      setState(() {
+        _qrCodeUri = 'wc:8a5e5bdc-0e0f-4c3a-8b5c-6d7e8f9a0b1c@2?relayUrl=wss://relay.walletconnect.com&symKey=';
+        _showQRCode = true;
+      });
+      
+      _showQRDialog();
+    } catch (e) {
+      _showErrorDialog(e.toString());
+    } finally {
+      setState(() => _isConnecting = false);
+    }
+  }
+
+  void _showQRDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Scan QR Code'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Scan this QR code with MetaMask mobile app:'),
+            const SizedBox(height: 20),
+            if (_qrCodeUri != null)
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: VaultXColors.border),
+                ),
+                child: QrImageView(
+                  data: _qrCodeUri!,
+                  version: QrVersions.auto,
+                  size: 200.0,
+                ),
+              ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    setState(() => _showQRCode = false);
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setState(() => _showQRCode = false);
+                    Navigator.pop(context);
+                    _connectWallet(); // Try direct connection
+                  },
+                  child: const Text('Open MetaMask'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showUnsupportedPlatformDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Mobile Wallet Support'),
+        content: const Text('On mobile, you can connect via WalletConnect or scan QR code with MetaMask app.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _showQRCodeDialog();
+            },
+            child: const Text('Scan QR'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMetaMaskNotInstalledDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('MetaMask Not Found'),
+        content: const Text('Please install MetaMask browser extension to continue.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSuccessDialog(String account) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Wallet Connected!'),
+        content: Text('Connected to: ${account.substring(0, 6)}...${account.substring(account.length - 4)}'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SignupScreen()),
+              );
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showErrorDialog(String error) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Connection Error'),
+        content: Text(error),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -86,15 +285,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 28),
                 child: GestureDetector(
-                  onTap: goNext,
+                  onTap: _isConnecting ? null : _connectWallet,
                   child: Container(
                     height: 62,
                     width: double.infinity,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(22),
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF483C35), Color(0xFFD1671F)],
-                      ),
+                      gradient: _isConnecting 
+                        ? LinearGradient(
+                            colors: [
+                              VaultXColors.textSecondary.withValues(alpha: 0.5),
+                              VaultXColors.textSecondary.withValues(alpha: 0.3),
+                            ],
+                          )
+                        : const LinearGradient(
+                            colors: [Color(0xFF483C35), Color(0xFFD1671F)],
+                          ),
                       boxShadow: [
                         BoxShadow(
                           color: VaultXColors.accent.withValues(alpha: 0.22),
@@ -113,18 +319,33 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             color: Colors.white.withValues(alpha: 0.14),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(
-                            Icons.account_balance_wallet_outlined,
-                            color: Colors.white,
-                            size: 20,
-                          ),
+                          child: _isConnecting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(
+                                _isConnected 
+                                  ? Icons.check_circle_outline
+                                  : Icons.account_balance_wallet_outlined,
+                                color: Colors.white,
+                                size: 20,
+                              ),
                         ),
 
                         const SizedBox(width: 14),
 
-                        const Text(
-                          "Connect with MetaMask",
-                          style: TextStyle(
+                        Text(
+                          _isConnecting 
+                            ? "Connecting..."
+                            : _isConnected 
+                              ? "Wallet Connected"
+                              : "Connect with MetaMask",
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
