@@ -1,0 +1,40 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String   @id @default(uuid())
+  walletAddress String   @unique 
+  email         String?  @unique
+  fcmToken      String?  // Firebase token for Push Notifications
+  createdAt     DateTime @default(now())
+  
+  alerts        PriceAlert[]
+  vaults        VaultMetadata[]
+}
+
+model VaultMetadata {
+  id               String @id @default(uuid())
+  contractAddress  String @unique
+  ownerAddress     String
+  user             User   @relation(fields: [ownerAddress], references: [walletAddress])
+  
+  inactivityDays   Int
+  graceDays        Int
+}
+
+model PriceAlert {
+  id             String  @id @default(uuid())
+  userAddress    String
+  user           User    @relation(fields: [userAddress], references: [walletAddress])
+  asset          String  // e.g., "ethereum"
+  buyPrice       Float
+  thresholdPct   Float   @default(10.0) // Your 10% logic
+  lastNotified   DateTime?
+  isActive       Boolean @default(true)
+}
